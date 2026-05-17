@@ -13,6 +13,7 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <ctype.h>
+#include <string.h>
 
 /* Internal Library Includes */
 #include "serialio.h"
@@ -22,6 +23,7 @@
 #include "encoding.h"
 #include "timer.h"
 #include "sevensegdisplay.h"
+#include "buzzer.h"
 
 /* Internal Function Declarations */
 void initialise_hardware(void);
@@ -37,6 +39,11 @@ uint8_t current_morse_state = 1;
 uint8_t matrix_animation_frame = 0;
 uint16_t led_io_animation_frame = 0;
 uint64_t led_io_animation = 0;
+
+int buzzer_animation_frame = 50;
+float buzzer_duty_cycle_animation[50];
+uint16_t buzzer_frequency_animation[50];
+float BASE_FREQUENCY = 200.0;
 
 uint8_t marks_inputted = 0;
 uint8_t characters_inputted = 0;
@@ -63,6 +70,8 @@ void initialise_hardware(void)
     // Setup serial port for 19200 baud communication
 
     init_serial_stdio(19200);
+    initialise_piezo();
+    play_piezo(200, 100); // silence it
     printf("\033[1;39m");
     sei(); // enable global interrupts
     // enable L2 to L7 on A2 to A7
@@ -114,6 +123,13 @@ void finish_animations()
             led_io_animation_frame--;
         }
     }
+    for (int i = 0; i < 50; i++)
+    {
+
+        buzzer_duty_cycle_animation[i] = 100;
+        buzzer_frequency_animation[i] = 0;
+    }
+    buzzer_animation_frame = 0;
 }
 
 void start_morse(void)
@@ -147,6 +163,7 @@ void start_morse(void)
 
                     led_io_animation_frame = 1;
                 }
+                buzzer_animation_frame = 1;
                 for (i = 7; i >= 0; i--)
                 {
                     // loop through all bits of the morse code until we find the start
@@ -167,6 +184,14 @@ void start_morse(void)
                             led_io_animation_frame += 3;
                             led_io_animation <<= 3;
                             led_io_animation |= 0b111;
+
+                            for (int j = 0; j < 3; j++)
+                            {
+
+                                buzzer_duty_cycle_animation[buzzer_animation_frame] = 50;
+                                buzzer_frequency_animation[buzzer_animation_frame] = 600;
+                                buzzer_animation_frame++;
+                            }
                         }
                         else
                         {
@@ -174,27 +199,43 @@ void start_morse(void)
                             led_io_animation_frame += 1;
                             led_io_animation <<= 1;
                             led_io_animation |= 0b1;
+
+                            buzzer_duty_cycle_animation[buzzer_animation_frame] = 50;
+                            buzzer_frequency_animation[buzzer_animation_frame] = 400;
+                            buzzer_animation_frame++;
                         }
                         if (i == 0)
                         {
                             // add character submit
                             led_io_animation_frame += 3;
                             led_io_animation <<= 3;
+                            buzzer_duty_cycle_animation[buzzer_animation_frame - 1] = 10;
+                            if (bit)
+                            {
+                                buzzer_duty_cycle_animation[buzzer_animation_frame - 2] = 10;
+                                buzzer_duty_cycle_animation[buzzer_animation_frame - 3] = 10;
+                            }
                         }
                         else
                         {
                             // add mark submit
                             led_io_animation_frame += 1;
                             led_io_animation <<= 1;
+
+                            buzzer_duty_cycle_animation[buzzer_animation_frame] = 100;
+                            buzzer_frequency_animation[buzzer_animation_frame] = 500;
+                            buzzer_animation_frame++;
                         }
                     }
                 }
+
                 printf("\033[1;33m%c", character);
                 cursor_x++;
                 draw_small_char(character, MATRIX_NUM_COLUMNS, COLOUR_YELLOW);
                 characters_inputted++;
                 matrix_animation_frame = 4;
                 consecutive_submits = 1;
+                buzzer_animation_frame = 0;
             }
         }
 
@@ -392,7 +433,7 @@ void handle_inputs(void)
 
     --. --- --- -.. / .-.. ..- -.-. -.-
     */
-    synchonous_mode = (PIND >> PD6) & 1;
+    synchonous_mode = (PIND >> PD4) & 1;
     if (!synchonous_mode)
     {
         handle_asynchronous_inputs();
@@ -409,7 +450,9 @@ ISR(TIMER1_COMPA_vect)
 {
     if (matrix_animation_frame > 0)
     {
+
         shift_display_left(1);
+
         matrix_animation_frame--;
     }
 
@@ -419,6 +462,18 @@ ISR(TIMER1_COMPA_vect)
         led_io_state <<= 1;
         led_io_state |= next_led;
         led_io_animation_frame--;
+    }
+    if (buzzer_animation_frame < 50)
+    {
+        float duty_cycle = buzzer_duty_cycle_animation[buzzer_animation_frame];
+        uint8_t frequency = buzzer_frequency_animation[buzzer_animation_frame];
+        buzzer_animation_frame++;
+        play_piezo(frequency, duty_cycle);
+    }
+    else
+    {
+
+        play_piezo(200, 100);
     }
 
     int b0_released = !(PINB & (1 << PB0));
