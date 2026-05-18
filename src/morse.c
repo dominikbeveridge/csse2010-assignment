@@ -40,6 +40,28 @@ uint8_t matrix_animation_frame = 0;
 uint16_t led_io_animation_frame = 0;
 uint64_t led_io_animation = 0;
 
+uint8_t submit_animation_frames[2] = {4, 7};
+
+// stores character history. History is stored from left to right (left is oldest)
+char character_history[50];
+uint8_t colour_history[50];
+int character_index = 0;
+void save_history(char arr[50], char character)
+{
+    if (character_index < 50)
+    {
+        arr[character_index] = character;
+    }
+    else
+    {
+        character_index = 49;
+        memmove(arr, arr + 1, 50 - 1);
+        arr[character_index] = character;
+    }
+}
+int previous_large = 0;
+int is_font_large = 0;
+
 int buzzer_animation_frame = 50;
 float buzzer_duty_cycle_animation[50];
 uint16_t buzzer_frequency_animation[50];
@@ -53,7 +75,6 @@ int cursor_x = 1;
 int cursor_y = 1;
 int consecutive_submits = 0;
 
-int synchonous_mode = 1;
 uint32_t b0_hold_time_ms = 0;
 uint32_t b0_release_time_ms = 0;
 
@@ -219,9 +240,12 @@ void handle_serial_input()
 
         printf("\033[1;33m%c", character);
         cursor_x++;
-        draw_small_char(character, MATRIX_NUM_COLUMNS, COLOUR_YELLOW);
+        draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_YELLOW, is_font_large);
+        save_history(character_history, character);
+        save_history(colour_history, COLOUR_YELLOW);
+        character_index++;
         characters_inputted++;
-        matrix_animation_frame = 4;
+        matrix_animation_frame = submit_animation_frames[is_font_large];
         consecutive_submits = 1;
         buzzer_animation_frame = 0;
     }
@@ -304,9 +328,12 @@ void handle_dot()
 
     char character = morse_to_char(current_morse_state);
 
+    save_history(character_history, character);
+    save_history(colour_history, COLOUR_RED);
+
     move_terminal_cursor(cursor_x, cursor_y);
     printf("\033[1;31m%c", character);
-    draw_small_char(character, MATRIX_NUM_COLUMNS, COLOUR_RED);
+    draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_RED, is_font_large);
 }
 
 void handle_dash()
@@ -329,10 +356,11 @@ void handle_dash()
     consecutive_submits = 0;
 
     char character = morse_to_char(current_morse_state);
-
+    save_history(character_history, character);
+    save_history(colour_history, COLOUR_RED);
     move_terminal_cursor(cursor_x, cursor_y);
     printf("\033[1;31m%c", character);
-    draw_small_char(character, MATRIX_NUM_COLUMNS, COLOUR_RED);
+    draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_RED, is_font_large);
 }
 
 void handle_submit()
@@ -345,21 +373,26 @@ void handle_submit()
         led_io_animation_frame = 3;
         led_io_animation = 0b000;
         char character = morse_to_char(current_morse_state);
+
+        save_history(character_history, character);
+        save_history(colour_history, COLOUR_GREEN);
+        character_index++;
         move_terminal_cursor(cursor_x, cursor_y);
         printf("\033[1;32m%c", character);
         cursor_x++;
-        draw_small_char(character, MATRIX_NUM_COLUMNS, COLOUR_GREEN);
+        draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_GREEN, is_font_large);
         characters_inputted++;
-        matrix_animation_frame = 4;
+        matrix_animation_frame = submit_animation_frames[is_font_large];
     }
     else if (consecutive_submits == 2)
     {
         // Submit word
         printf(" ");
+        character_index++;
         cursor_x++;
         led_io_animation_frame = 2;
         led_io_animation = 0b00;
-        matrix_animation_frame = 4;
+        matrix_animation_frame = submit_animation_frames[is_font_large];
     }
 
     current_morse_state = 1;
@@ -431,10 +464,27 @@ void handle_synchronous_inputs()
     prev_b0 = b0_pressed;
 }
 
+void rerender(int font_large)
+{
+    finish_animations();
+    draw_character_history(character_history, colour_history, character_index, font_large);
+}
+
 void handle_inputs(void)
 {
 
-    synchonous_mode = (PIND >> PD4) & 1;
+    is_font_large = (PIND >> PD5) & 1;
+    if (is_font_large && !previous_large)
+    {
+        rerender(is_font_large);
+    }
+    else if (!is_font_large && previous_large)
+    {
+        rerender(is_font_large);
+    }
+    previous_large = is_font_large;
+
+    int synchonous_mode = (PIND >> PD4) & 1;
     if (!synchonous_mode)
     {
         handle_asynchronous_inputs();
@@ -480,8 +530,8 @@ ISR(TIMER1_COMPA_vect)
     }
 
     // Count hold times
-    int s0_synchronous_mode = (PIND >> PD4) & 1;
-    if (s0_synchronous_mode)
+    int synchronous_mode = (PIND >> PD4) & 1;
+    if (synchronous_mode)
     {
 
         int b0_released = !(PINB & (1 << PB0));

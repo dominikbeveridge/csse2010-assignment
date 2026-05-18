@@ -14,6 +14,7 @@
 #define CMD_CLEAR_SCREEN 0x0F
 #define CMD_SHIFT 0x04
 #define LEFT_SHIFT 0b0010
+#define CMD_UPDATE_ALL 0x00
 
 void ledmatrix_update_column(uint8_t x, uint8_t pixels[MATRIX_NUM_ROWS])
 
@@ -41,3 +42,9 @@ void ledmatrix_shift_left(void)
     (void)spi_send_byte(LEFT_SHIFT);
 }
 // sure would be useful to be able to use the other LED matrix commands...
+
+void ledmatrix_update_display(uint8_t pixels[MATRIX_NUM_COLUMNS * MATRIX_NUM_ROWS])
+{
+    (void)spi_send_byte(CMD_UPDATE_ALL);
+    (void)spi_send_byte(pixels);
+}
