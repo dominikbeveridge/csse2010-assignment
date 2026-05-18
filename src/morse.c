@@ -132,6 +132,129 @@ void finish_animations()
     buzzer_animation_frame = 0;
 }
 
+void handle_serial_input()
+{
+    int input = fgetc(stdin);
+    if (isalnum(input))
+    {
+        finish_animations();
+        current_morse_state = 1;
+        marks_inputted = 0;
+        char character = toupper(input);
+        uint8_t morse = char_to_morse(character);
+        int i;
+        int first_bit_found = 0;
+
+        led_io_animation = 0;
+        if (consecutive_submits == 0)
+        {
+
+            led_io_animation_frame = 1;
+        }
+        buzzer_animation_frame = 1;
+        for (i = 7; i >= 0; i--)
+        {
+            // loop through all bits of the morse code until we find the start
+            int bit = (morse & (1 << i)) >> i;
+
+            if (!first_bit_found && bit)
+            {
+                first_bit_found = 1;
+                continue;
+            }
+
+            if (first_bit_found)
+            {
+                marks_inputted++;
+                if (bit)
+                {
+                    // queue dash to be animated
+                    led_io_animation_frame += 3;
+                    led_io_animation <<= 3;
+                    led_io_animation |= 0b111;
+
+                    for (int j = 0; j < 3; j++)
+                    {
+
+                        buzzer_duty_cycle_animation[buzzer_animation_frame] = 50;
+                        buzzer_frequency_animation[buzzer_animation_frame] = 600;
+                        buzzer_animation_frame++;
+                    }
+                }
+                else
+                {
+                    // queue dot to be animated
+                    led_io_animation_frame += 1;
+                    led_io_animation <<= 1;
+                    led_io_animation |= 0b1;
+
+                    buzzer_duty_cycle_animation[buzzer_animation_frame] = 50;
+                    buzzer_frequency_animation[buzzer_animation_frame] = 400;
+                    buzzer_animation_frame++;
+                }
+                if (i == 0)
+                {
+                    // add character submit
+                    led_io_animation_frame += 3;
+                    led_io_animation <<= 3;
+                    buzzer_duty_cycle_animation[buzzer_animation_frame - 1] = 10;
+                    if (bit)
+                    {
+                        buzzer_duty_cycle_animation[buzzer_animation_frame - 2] = 10;
+                        buzzer_duty_cycle_animation[buzzer_animation_frame - 3] = 10;
+                    }
+                }
+                else
+                {
+                    // add mark submit
+                    led_io_animation_frame += 1;
+                    led_io_animation <<= 1;
+
+                    buzzer_duty_cycle_animation[buzzer_animation_frame] = 100;
+                    buzzer_frequency_animation[buzzer_animation_frame] = 500;
+                    buzzer_animation_frame++;
+                }
+            }
+        }
+
+        printf("\033[1;33m%c", character);
+        cursor_x++;
+        draw_small_char(character, MATRIX_NUM_COLUMNS, COLOUR_YELLOW);
+        characters_inputted++;
+        matrix_animation_frame = 4;
+        consecutive_submits = 1;
+        buzzer_animation_frame = 0;
+    }
+}
+void render_ssd()
+{
+    // Render SSD
+    ssd_mux++;
+    if (ssd_mux >= 0 && ssd_mux < 100)
+    {
+        if (marks_inputted > 0 && marks_inputted < 10)
+        {
+            ss_render_number(0, marks_inputted, 0);
+        }
+        else if (marks_inputted >= 10)
+        {
+            ss_render_hyphen(0, 0);
+        }
+        else if (marks_inputted == 0)
+        {
+            ss_render_blank(0);
+        }
+    }
+    else
+    {
+        uint8_t decimal_point = marks_inputted > 0;
+        ss_render_number(1, characters_inputted, decimal_point);
+    }
+    if (ssd_mux > 200)
+    {
+        ssd_mux = 0;
+    }
+}
 void start_morse(void)
 {
     // Clear the serial terminal
@@ -143,130 +266,18 @@ void start_morse(void)
     {
         // Handle any button or key inputs
         handle_inputs();
+        // Handle serial input
         if (serial_input_available())
         {
-
-            int input = fgetc(stdin);
-            if (isalnum(input))
-            {
-                finish_animations();
-                current_morse_state = 1;
-                marks_inputted = 0;
-                char character = toupper(input);
-                uint8_t morse = char_to_morse(character);
-                int i;
-                int first_bit_found = 0;
-
-                led_io_animation = 0;
-                if (consecutive_submits == 0)
-                {
-
-                    led_io_animation_frame = 1;
-                }
-                buzzer_animation_frame = 1;
-                for (i = 7; i >= 0; i--)
-                {
-                    // loop through all bits of the morse code until we find the start
-                    int bit = (morse & (1 << i)) >> i;
-
-                    if (!first_bit_found && bit)
-                    {
-                        first_bit_found = 1;
-                        continue;
-                    }
-
-                    if (first_bit_found)
-                    {
-                        marks_inputted++;
-                        if (bit)
-                        {
-                            // queue dash to be animated
-                            led_io_animation_frame += 3;
-                            led_io_animation <<= 3;
-                            led_io_animation |= 0b111;
-
-                            for (int j = 0; j < 3; j++)
-                            {
-
-                                buzzer_duty_cycle_animation[buzzer_animation_frame] = 50;
-                                buzzer_frequency_animation[buzzer_animation_frame] = 600;
-                                buzzer_animation_frame++;
-                            }
-                        }
-                        else
-                        {
-                            // queue dot to be animated
-                            led_io_animation_frame += 1;
-                            led_io_animation <<= 1;
-                            led_io_animation |= 0b1;
-
-                            buzzer_duty_cycle_animation[buzzer_animation_frame] = 50;
-                            buzzer_frequency_animation[buzzer_animation_frame] = 400;
-                            buzzer_animation_frame++;
-                        }
-                        if (i == 0)
-                        {
-                            // add character submit
-                            led_io_animation_frame += 3;
-                            led_io_animation <<= 3;
-                            buzzer_duty_cycle_animation[buzzer_animation_frame - 1] = 10;
-                            if (bit)
-                            {
-                                buzzer_duty_cycle_animation[buzzer_animation_frame - 2] = 10;
-                                buzzer_duty_cycle_animation[buzzer_animation_frame - 3] = 10;
-                            }
-                        }
-                        else
-                        {
-                            // add mark submit
-                            led_io_animation_frame += 1;
-                            led_io_animation <<= 1;
-
-                            buzzer_duty_cycle_animation[buzzer_animation_frame] = 100;
-                            buzzer_frequency_animation[buzzer_animation_frame] = 500;
-                            buzzer_animation_frame++;
-                        }
-                    }
-                }
-
-                printf("\033[1;33m%c", character);
-                cursor_x++;
-                draw_small_char(character, MATRIX_NUM_COLUMNS, COLOUR_YELLOW);
-                characters_inputted++;
-                matrix_animation_frame = 4;
-                consecutive_submits = 1;
-                buzzer_animation_frame = 0;
-            }
+            handle_serial_input();
         }
 
+        // render LED state
         PORTA = led_io_state;
         PORTD &= ~(0b11 << 2);
         PORTD |= ((led_io_state) & (0b11)) << 2;
-        ssd_mux++;
-        if (ssd_mux >= 0 && ssd_mux < 100)
-        {
-            if (marks_inputted > 0 && marks_inputted < 10)
-            {
-                ss_render_number(0, marks_inputted, 0);
-            }
-            else if (marks_inputted >= 10)
-            {
-                ss_render_hyphen(0, 0);
-            }
-            else if (marks_inputted == 0)
-            {
-                ss_render_blank(0);
-            }
-        }
-        else
-        {
-            uint8_t decimal_point = marks_inputted > 0;
-            ss_render_number(1, characters_inputted, decimal_point);
-        }
-        if (ssd_mux > 200)
-        {
-            ssd_mux = 0;
-        }
+
+        render_ssd();
     }
     // should never reach
 }
@@ -422,17 +433,7 @@ void handle_synchronous_inputs()
 
 void handle_inputs(void)
 {
-    /* ******** START HERE ********
 
-    Read the button. Enter a mark if there is a rising edge on b0.
-    A way to do this is to check if the previous b0 state is 0,
-    and the current b0 state is a 1.
-    (You will need to implement a method of tracking the previous b0 state.)
-    Ensure that when you press a button to exit the splash screen,
-    that this button press doesn't immediately trigger an input here.
-
-    --. --- --- -.. / .-.. ..- -.-. -.-
-    */
     synchonous_mode = (PIND >> PD4) & 1;
     if (!synchonous_mode)
     {
@@ -448,6 +449,7 @@ void handle_inputs(void)
 // Timer 1 is initalised to 100ms frequency
 ISR(TIMER1_COMPA_vect)
 {
+    // Animate queued matrix frames
     if (matrix_animation_frame > 0)
     {
 
@@ -455,7 +457,7 @@ ISR(TIMER1_COMPA_vect)
 
         matrix_animation_frame--;
     }
-
+    // Animated queued LED frames
     if (led_io_animation_frame > 0)
     {
         uint8_t next_led = led_io_animation >> (led_io_animation_frame - 1);
@@ -463,6 +465,7 @@ ISR(TIMER1_COMPA_vect)
         led_io_state |= next_led;
         led_io_animation_frame--;
     }
+    // Play queued buzzer tones
     if (buzzer_animation_frame < 50)
     {
         float duty_cycle = buzzer_duty_cycle_animation[buzzer_animation_frame];
@@ -472,19 +475,30 @@ ISR(TIMER1_COMPA_vect)
     }
     else
     {
-
+        // stop buzzer
         play_piezo(200, 100);
     }
 
-    int b0_released = !(PINB & (1 << PB0));
-    if (b0_released)
+    // Count hold times
+    int s0_synchronous_mode = (PIND >> PD4) & 1;
+    if (s0_synchronous_mode)
     {
-        b0_hold_time_ms = 0;
-        b0_release_time_ms += 100;
+
+        int b0_released = !(PINB & (1 << PB0));
+        if (b0_released)
+        {
+            b0_hold_time_ms = 0;
+            b0_release_time_ms += 100;
+        }
+        else
+        {
+            b0_release_time_ms = 0;
+            b0_hold_time_ms += 100;
+        }
     }
     else
     {
+        b0_hold_time_ms = 0;
         b0_release_time_ms = 0;
-        b0_hold_time_ms += 100;
     }
 }
