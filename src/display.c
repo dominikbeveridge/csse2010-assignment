@@ -316,7 +316,7 @@ void draw_character_history(char character_history[50], uint8_t colour_history[5
         {
 
             draw_small_char_column(' ', i * 4, 0, 0x00, 0x00);
-            if (character_index < i)
+            if (character_index < i || character_index - i > 49)
             {
                 draw_small_char(' ', MATRIX_NUM_COLUMNS - i * 4, 0x00, 0x00);
                 continue;
@@ -336,9 +336,10 @@ void draw_character_history(char character_history[50], uint8_t colour_history[5
             draw_large_char_column(' ', i * 7 + 2, 0, 0x00, 0x00);
             draw_large_char_column(' ', i * 7 + 3, 0, 0x00, 0x00);
 
-            if (character_index < i)
+            if (character_index < i || character_index - i > 49)
             {
                 draw_large_char(' ', MATRIX_NUM_COLUMNS - i * 7, 0x00, 0x00);
+                continue;
             }
             char character = character_history[character_index - i];
 
