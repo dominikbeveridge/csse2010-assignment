@@ -161,7 +161,23 @@ const uint8_t font_large[38][5] =
         {0b01000000, 0b10000000, 0b10001011, 0b10010000, 0b01100000}  // '?'
 };
 
-void draw_small_char(char character, uint8_t x_position, uint8_t colour)
+uint8_t brightness_adjusted_colour(uint8_t colour, uint8_t brightness)
+{
+    uint8_t green = colour >> 4;
+    if (green == 0xF)
+    {
+        green = brightness;
+    }
+    uint8_t red = colour & 0xF;
+    if (red == 0xF)
+    {
+        red = brightness;
+    }
+
+    return ((green << 4) | red);
+}
+
+void draw_small_char(char character, uint8_t x_position, uint8_t colour, uint8_t brightness)
 {
     // todo
     // get one column of the character's glyph with get_small_glyph_column
@@ -177,7 +193,7 @@ void draw_small_char(char character, uint8_t x_position, uint8_t colour)
         {
             if (col_data & 1)
             {
-                column_colour_data[i] = colour;
+                column_colour_data[i] = brightness_adjusted_colour(colour, brightness);
             }
             else
             {
@@ -189,7 +205,7 @@ void draw_small_char(char character, uint8_t x_position, uint8_t colour)
     }
 }
 
-void draw_small_char_column(char character, uint8_t x_position, uint8_t col, uint8_t colour)
+void draw_small_char_column(char character, uint8_t x_position, uint8_t col, uint8_t colour, uint8_t brightness)
 {
     uint8_t column_colour_data[MATRIX_NUM_ROWS];
 
@@ -198,7 +214,7 @@ void draw_small_char_column(char character, uint8_t x_position, uint8_t col, uin
     {
         if (col_data & 1)
         {
-            column_colour_data[i] = colour;
+            column_colour_data[i] = brightness_adjusted_colour(colour, brightness);
         }
         else
         {
@@ -249,7 +265,7 @@ void shift_display_left(int amount)
         ledmatrix_shift_left();
     }
 }
-void draw_large_char(char character, uint8_t x_position, uint8_t colour)
+void draw_large_char(char character, uint8_t x_position, uint8_t colour, uint8_t brightness)
 {
     uint8_t column_colour_data[MATRIX_NUM_ROWS];
     for (uint8_t col = 0; col < 5; col++)
@@ -259,7 +275,7 @@ void draw_large_char(char character, uint8_t x_position, uint8_t colour)
         {
             if (col_data & 1)
             {
-                column_colour_data[i] = colour;
+                column_colour_data[i] = brightness_adjusted_colour(colour, brightness);
             }
             else
             {
@@ -271,22 +287,44 @@ void draw_large_char(char character, uint8_t x_position, uint8_t colour)
     }
 }
 
-void draw_character_history(char character_history[50], uint8_t colour_history[50], int character_index, int font_large)
+void draw_large_char_column(char character, uint8_t x_position, uint8_t col, uint8_t colour, uint8_t brightness)
+{
+    uint8_t column_colour_data[MATRIX_NUM_ROWS];
+    uint8_t col_data = get_large_glyph_column(character, col);
+    for (uint8_t i = 0; i < MATRIX_NUM_ROWS; i++)
+    {
+        if (col_data & 1)
+        {
+            column_colour_data[i] = brightness_adjusted_colour(colour, brightness);
+        }
+        else
+        {
+            column_colour_data[i] = COLOUR_BLACK;
+        }
+        col_data >>= 1;
+    }
+    ledmatrix_update_column(x_position, column_colour_data);
+}
+
+void draw_character_history(char character_history[50], uint8_t colour_history[50], int character_index, int font_large, uint8_t brightness)
 {
 
-    ledmatrix_clear();
     if (!font_large)
 
     {
         for (int i = 0; i < 4; i++)
         {
-            char character = character_history[character_index - i];
-            if (character == 0)
+
+            draw_small_char_column(' ', i * 4, 0, 0x00, 0x00);
+            if (character_index < i)
             {
+                draw_small_char(' ', MATRIX_NUM_COLUMNS - i * 4, 0x00, 0x00);
                 continue;
             }
+            char character = character_history[character_index - i];
+
             uint8_t colour = colour_history[character_index - i];
-            draw_small_char(character, MATRIX_NUM_COLUMNS - i * 4, colour);
+            draw_small_char(character, MATRIX_NUM_COLUMNS - i * 4, colour, brightness);
         }
     }
     else
@@ -295,25 +333,29 @@ void draw_character_history(char character_history[50], uint8_t colour_history[5
         // space for 3 letters
         for (int i = 0; i < 3; i++)
         {
-            char character = character_history[character_index - i];
-            if (character == 0)
+            draw_large_char_column(' ', i * 7 + 2, 0, 0x00, 0x00);
+            draw_large_char_column(' ', i * 7 + 3, 0, 0x00, 0x00);
+
+            if (character_index < i)
             {
-                continue;
+                draw_large_char(' ', MATRIX_NUM_COLUMNS - i * 7, 0x00, 0x00);
             }
+            char character = character_history[character_index - i];
+
             uint8_t colour = colour_history[character_index - i];
-            draw_large_char(character, MATRIX_NUM_COLUMNS - i * 7, colour);
+            draw_large_char(character, MATRIX_NUM_COLUMNS - i * 7, colour, brightness);
         }
     }
 }
 
-void draw_char(char character, uint8_t x_position, uint8_t colour, int is_font_large)
+void draw_char(char character, uint8_t x_position, uint8_t colour, int is_font_large, uint8_t brightness)
 {
     if (is_font_large)
     {
-        draw_large_char(character, x_position, colour);
+        draw_large_char(character, x_position, colour, brightness);
     }
     else
     {
-        draw_small_char(character, x_position, colour);
+        draw_small_char(character, x_position, colour, brightness);
     }
 }

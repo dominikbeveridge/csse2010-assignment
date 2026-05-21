@@ -72,6 +72,7 @@ float BASE_FREQUENCY = 200.0;
 uint8_t marks_inputted = 0;
 uint8_t characters_inputted = 0;
 uint8_t ssd_mux = 0;
+uint8_t ssd_acc = 0;
 
 int cursor_x = 1;
 int cursor_y = 1;
@@ -86,6 +87,14 @@ uint16_t joystick_y = 512;
 uint16_t scrollback = 0;
 
 uint16_t joystick_scaler = 0;
+
+uint16_t brightness_acc = 0;
+uint8_t brightness_level = 15;
+uint8_t prev_brightness_up = 0;
+uint8_t prev_brightness_down = 0;
+
+int brightness_down = 0;
+int brightness_up = 0;
 
 int main(void)
 {
@@ -145,7 +154,7 @@ void finish_animations()
     }
     else if (scrollback > 0)
     {
-        draw_character_history(character_history, colour_history, character_index, is_font_large);
+        draw_character_history(character_history, colour_history, character_index, is_font_large, brightness_level);
         scrollback = 0;
         matrix_animation_frame = 0;
     }
@@ -172,7 +181,7 @@ void rerender()
 {
 
     finish_animations();
-    draw_character_history(character_history, colour_history, character_index, is_font_large);
+    draw_character_history(character_history, colour_history, character_index, is_font_large, brightness_level);
 }
 void handle_serial_input()
 {
@@ -219,7 +228,7 @@ void handle_serial_input()
                     {
 
                         buzzer_duty_cycle_animation[buzzer_animation_frame] = 50;
-                        buzzer_frequency_animation[buzzer_animation_frame] = 600;
+                        buzzer_frequency_animation[buzzer_animation_frame] = 900;
                         buzzer_animation_frame++;
                     }
                 }
@@ -231,7 +240,7 @@ void handle_serial_input()
                     led_io_animation |= 0b1;
 
                     buzzer_duty_cycle_animation[buzzer_animation_frame] = 50;
-                    buzzer_frequency_animation[buzzer_animation_frame] = 400;
+                    buzzer_frequency_animation[buzzer_animation_frame] = 600;
                     buzzer_animation_frame++;
                 }
                 if (i == 0)
@@ -261,7 +270,7 @@ void handle_serial_input()
 
         printf("\033[1;33m%c", character);
         cursor_x++;
-        draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_YELLOW, is_font_large);
+        draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_YELLOW, is_font_large, brightness_level);
         save_history(character_history, character);
         save_history(colour_history, COLOUR_YELLOW);
         character_index++;
@@ -274,30 +283,32 @@ void handle_serial_input()
 void render_ssd()
 {
     // Render SSD
-    ssd_mux++;
-    if (ssd_mux >= 0 && ssd_mux < 100)
+    ssd_acc++;
+    if (ssd_acc > 10)
     {
-        if (marks_inputted > 0 && marks_inputted < 10)
+        ssd_acc = 0;
+        if (ssd_mux == 0)
         {
-            ss_render_number(0, marks_inputted, 0);
+            ssd_mux = 1;
+            if (marks_inputted > 0 && marks_inputted < 10)
+            {
+                ss_render_number(0, marks_inputted, 0);
+            }
+            else if (marks_inputted >= 10)
+            {
+                ss_render_hyphen(0, 0);
+            }
+            else if (marks_inputted == 0)
+            {
+                ss_render_blank(0);
+            }
         }
-        else if (marks_inputted >= 10)
+        else
         {
-            ss_render_hyphen(0, 0);
+            ssd_mux = 0;
+            uint8_t decimal_point = marks_inputted > 0;
+            ss_render_number(1, characters_inputted, decimal_point);
         }
-        else if (marks_inputted == 0)
-        {
-            ss_render_blank(0);
-        }
-    }
-    else
-    {
-        uint8_t decimal_point = marks_inputted > 0;
-        ss_render_number(1, characters_inputted, decimal_point);
-    }
-    if (ssd_mux > 200)
-    {
-        ssd_mux = 0;
     }
 }
 void start_morse(void)
@@ -320,8 +331,8 @@ void start_morse(void)
 
         // render LED state
         PORTA = led_io_state;
-        PORTD &= ~(0b11 << 2);
-        PORTD |= ((led_io_state) & (0b11)) << 2;
+        // PORTD &= ~(0b11 << 2);
+        PORTD = (PORTD & ~(0b11 << 2)) | ((led_io_state) & (0b11)) << 2;
 
         render_ssd();
     }
@@ -355,7 +366,7 @@ void handle_dot()
 
     move_terminal_cursor(cursor_x, cursor_y);
     printf("\033[1;31m%c", character);
-    draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_RED, is_font_large);
+    draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_RED, is_font_large, brightness_level);
 }
 
 void handle_dash()
@@ -382,7 +393,7 @@ void handle_dash()
     save_history(colour_history, COLOUR_RED);
     move_terminal_cursor(cursor_x, cursor_y);
     printf("\033[1;31m%c", character);
-    draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_RED, is_font_large);
+    draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_RED, is_font_large, brightness_level);
 }
 
 void handle_submit()
@@ -402,7 +413,7 @@ void handle_submit()
         move_terminal_cursor(cursor_x, cursor_y);
         printf("\033[1;32m%c", character);
         cursor_x++;
-        draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_GREEN, is_font_large);
+        draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_GREEN, is_font_large, brightness_level);
         characters_inputted++;
         matrix_animation_frame = submit_animation_frames[is_font_large];
     }
@@ -410,6 +421,8 @@ void handle_submit()
     {
         // Submit word
         printf(" ");
+
+        save_history(character_history, ' ');
         character_index++;
         cursor_x++;
         led_io_animation_frame = 2;
@@ -567,6 +580,30 @@ ISR(TIMER1_COMPA_vect)
         b0_hold_time_ms = 0;
         b0_release_time_ms = 0;
     }
+
+    brightness_acc += 100;
+
+    if (brightness_acc >= 1000)
+    {
+        brightness_acc = 0;
+        if (brightness_up)
+        {
+            if (brightness_level < 15)
+            {
+
+                brightness_level++;
+                rerender();
+            }
+        }
+        if (brightness_down)
+        {
+            if (brightness_level > 1)
+            {
+                brightness_level--;
+                rerender();
+            }
+        }
+    }
 }
 
 ISR(ADC_vect)
@@ -598,13 +635,146 @@ ISR(ADC_vect)
     float timer_modifier = 1 - strength;
 
     OCR0A = 70 + (uint8_t)(timer_modifier * 184.0);
+
+    brightness_down = joystick_y < (511 - DEADZONE);
+    brightness_up = joystick_y >= 512 + DEADZONE;
+    if (!brightness_down && !brightness_up)
+    {
+        brightness_acc = 0;
+    }
+
+    if (!prev_brightness_down && brightness_down)
+    {
+        if (brightness_level > 1)
+        {
+            brightness_level--;
+            rerender();
+        }
+    }
+    if (!prev_brightness_up && brightness_up)
+    {
+        if (brightness_level < 15)
+        {
+            brightness_level++;
+            rerender();
+        }
+    }
+
+    prev_brightness_up = brightness_up;
+    prev_brightness_down = brightness_down;
+
     // toggle `axis`, so that the next loop will read the other joystick axis
     axis = axis ? 0 : 1;
 
     set_joystick_read_axis(axis);
     ADCSRA |= (1 << ADSC);
 }
+void scroll_left_small_font()
+{
+    uint8_t stage = scrollback % 4;
 
+    int history_offset = scrollback / 4;
+    if (character_index < history_offset)
+    {
+        return;
+    }
+    scrollback--;
+    ledmatrix_shift_left();
+    if (stage == 0)
+    {
+        return;
+    }
+
+    int history_index = character_index - history_offset;
+    char history_letter = character_history[history_index];
+    uint8_t colour = colour_history[history_index];
+
+    if (stage != 0)
+    {
+        uint8_t col = 3 - stage;
+        draw_small_char_column(history_letter, MATRIX_NUM_COLUMNS - 1, col, colour, brightness_level);
+    }
+}
+
+void scroll_left_large_font()
+{
+    uint8_t stage = (scrollback - 1) % 7;
+
+    int history_offset = (scrollback - 1) / 7;
+    if (character_index < history_offset)
+    {
+        return;
+    }
+    scrollback--;
+    ledmatrix_shift_left();
+    if (stage == 5 || stage == 6)
+    {
+        return;
+    }
+
+    int history_index = character_index - history_offset;
+    char history_letter = character_history[history_index];
+    if (history_letter == 0)
+    {
+        return;
+    }
+    uint8_t colour = colour_history[history_index];
+
+    uint8_t col = 4 - stage;
+    draw_large_char_column(history_letter, MATRIX_NUM_COLUMNS - 1, col, colour, brightness_level);
+}
+void scroll_right_small_font()
+{
+    scrollback++;
+    uint8_t stage = scrollback % 4;
+
+    int history_offset = 4 + scrollback / 4;
+    if (character_index < history_offset)
+    {
+        scrollback--;
+        return;
+    }
+    ledmatrix_shift_right();
+    if (stage == 0)
+    {
+        return;
+    }
+
+    int history_index = character_index - history_offset;
+    char history_letter = character_history[history_index];
+    uint8_t colour = colour_history[history_index];
+
+    uint8_t col = 3 - stage;
+    draw_small_char_column(history_letter, 0, col, colour, brightness_level);
+}
+void scroll_right_large_font()
+{
+    scrollback++;
+    uint8_t stage = (scrollback + 1) % 7;
+
+    int history_offset = (scrollback + 1) / 7 + 2;
+    if (character_index < history_offset)
+    {
+        scrollback--;
+        return;
+    }
+    ledmatrix_shift_right();
+    if (stage == 5 || stage == 6)
+    {
+        return;
+    }
+
+    int history_index = character_index - history_offset;
+    char history_letter = character_history[history_index];
+    if (history_letter == 0)
+    {
+        return;
+    }
+    uint8_t colour = colour_history[history_index];
+
+    uint8_t col = (4 - stage);
+    draw_large_char_column(history_letter, 0, col, colour, brightness_level);
+}
 ISR(TIMER0_COMPA_vect)
 {
     joystick_scaler += 1;
@@ -615,61 +785,22 @@ ISR(TIMER0_COMPA_vect)
         {
             if (!is_font_large)
             {
-
-                uint8_t stage = scrollback % 4;
-
-                int history_offset = scrollback / 4;
-                if (character_index < history_offset)
-                {
-                    return;
-                }
-                scrollback--;
-                ledmatrix_shift_left();
-                if (stage == 0)
-                {
-                    return;
-                }
-
-                int history_index = character_index - history_offset;
-                char history_letter = character_history[history_index];
-                uint8_t colour = colour_history[history_index];
-
-                if (stage != 0)
-                {
-                    uint8_t col = 3 - stage;
-                    draw_small_char_column(history_letter, MATRIX_NUM_COLUMNS - 1, col, colour);
-                }
+                scroll_left_small_font();
+            }
+            else
+            {
+                scroll_left_large_font();
             }
         }
         else if (joystick_x >= 512 + DEADZONE)
         {
             if (!is_font_large)
             {
-
-                scrollback++;
-                uint8_t stage = scrollback % 4;
-
-                int history_offset = 4 + scrollback / 4;
-                if (character_index < history_offset)
-                {
-                    scrollback--;
-                    return;
-                }
-                ledmatrix_shift_right();
-                if (stage == 0)
-                {
-                    return;
-                }
-
-                int history_index = character_index - history_offset;
-                char history_letter = character_history[history_index];
-                uint8_t colour = colour_history[history_index];
-
-                if (stage != 0)
-                {
-                    uint8_t col = 3 - stage;
-                    draw_small_char_column(history_letter, 0, col, colour);
-                }
+                scroll_right_small_font();
+            }
+            else
+            {
+                scroll_right_large_font();
             }
         }
     }
