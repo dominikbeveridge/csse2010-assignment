@@ -35,10 +35,10 @@ void handle_inputs(void);
 int prev_b0 = 1;
 int prev_b1 = 1;
 int prev_b2 = 1;
-uint8_t led_io_state = 0b00000000;
+volatile uint8_t led_io_state = 0b00000000;
 uint8_t current_morse_state = 1;
-uint8_t matrix_animation_frame = 0;
-uint16_t led_io_animation_frame = 0;
+volatile uint8_t matrix_animation_frame = 0;
+volatile uint16_t led_io_animation_frame = 0;
 uint64_t led_io_animation = 0;
 
 float DEADZONE = 100;
@@ -67,9 +67,9 @@ void save_history(char character, uint8_t colour)
     }
 }
 int previous_large = 0;
-int is_font_large = 0;
+volatile int is_font_large = 0;
 
-int buzzer_animation_frame = 50;
+volatile int buzzer_animation_frame = 50;
 float buzzer_duty_cycle_animation[50];
 uint16_t buzzer_frequency_animation[50];
 float BASE_FREQUENCY = 200.0;
@@ -83,23 +83,23 @@ int cursor_x = 1;
 int cursor_y = 1;
 int consecutive_submits = 2;
 
-uint32_t b0_hold_time_ms = 0;
-uint32_t b0_release_time_ms = 0;
+volatile uint32_t b0_hold_time_ms = 0;
+volatile uint32_t b0_release_time_ms = 0;
 
-uint8_t axis = 0;
+volatile uint8_t axis = 0;
 volatile uint16_t joystick_x = 512;
-uint16_t joystick_y = 512;
-uint16_t scrollback = 0;
+volatile uint16_t joystick_y = 512;
+volatile uint16_t scrollback = 0;
 
-uint16_t joystick_scaler = 0;
+volatile uint16_t joystick_scaler = 0;
 
-uint16_t brightness_acc = 0;
-uint8_t brightness_level = 15;
-uint8_t prev_brightness_up = 0;
-uint8_t prev_brightness_down = 0;
+volatile uint16_t brightness_acc = 0;
+volatile uint8_t brightness_level = 15;
+volatile uint8_t prev_brightness_up = 0;
+volatile uint8_t prev_brightness_down = 0;
 
-int brightness_down = 0;
-int brightness_up = 0;
+volatile uint8_t brightness_down = 0;
+volatile uint8_t brightness_up = 0;
 
 int main(void)
 {
@@ -225,7 +225,6 @@ void handle_serial_input()
 
             if (first_bit_found)
             {
-                marks_inputted++;
                 if (bit)
                 {
                     // queue dash to be animated
@@ -276,7 +275,7 @@ void handle_serial_input()
                 }
             }
         }
-
+        move_terminal_cursor(cursor_x, cursor_y);
         printf("\033[1;33m%c", character);
         cursor_x++;
         draw_char(character, MATRIX_NUM_COLUMNS, COLOUR_YELLOW, is_font_large, brightness_level);
@@ -287,7 +286,7 @@ void handle_serial_input()
         consecutive_submits = 1;
         buzzer_animation_frame = 0;
     }
-    else if (input == ' ')
+    else if (input == ' ' && consecutive_submits == 1)
     {
         finish_animations();
         current_morse_state = 1;
@@ -295,6 +294,7 @@ void handle_serial_input()
         led_io_animation_frame += 2;
         led_io_animation <<= 2;
         consecutive_submits = 2;
+        move_terminal_cursor(cursor_x, cursor_y);
         cursor_x++;
         printf("\033[1;33m%c", ' ');
         draw_char(' ', MATRIX_NUM_COLUMNS, COLOUR_YELLOW, is_font_large, brightness_level);
@@ -342,6 +342,11 @@ void start_morse(void)
     {
         // Handle any button or key inputs
         handle_inputs();
+        if (cursor_x >= 80)
+        {
+            cursor_y++;
+            cursor_x = 1;
+        }
         // Handle serial input
         if (serial_input_available())
         {
@@ -625,7 +630,7 @@ ISR(TIMER1_COMPA_vect)
 ISR(ADC_vect)
 {
 
-    // printf("READING ADC");
+    // ("READING ADC");
     // if `axis` is 1, we just read the Y-axis, so allocate the ADC result to `y`
     // otherwise, we just read the X-axis, so allocate the result to `x`
 
@@ -653,7 +658,7 @@ ISR(ADC_vect)
     OCR0A = 70 + (uint8_t)(timer_modifier * 184.0);
 
     brightness_down = joystick_y < (511 - DEADZONE);
-    brightness_up = joystick_y >= 512 + DEADZONE;
+    brightness_up = joystick_y >= (512 + DEADZONE);
     if (!brightness_down && !brightness_up)
     {
         brightness_acc = 0;
@@ -794,9 +799,11 @@ void scroll_right_large_font()
 ISR(TIMER0_COMPA_vect)
 {
     joystick_scaler += 1;
+
     if (joystick_scaler > 3)
     {
         joystick_scaler = 0;
+
         if (joystick_x < 511 - DEADZONE && scrollback > 0)
         {
             if (!is_font_large)
