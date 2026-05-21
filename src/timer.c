@@ -8,7 +8,6 @@ uint16_t calculate_ocr(uint16_t frequency, uint16_t prescaler)
 {
     return (uint16_t)(8000000UL / (prescaler * frequency) - 1);
 }
-
 void initialise_100ms_timer()
 {
     // CTC Mode, with prescaler of 64
@@ -17,4 +16,13 @@ void initialise_100ms_timer()
     OCR1A = calculate_ocr(10, 64); // should be 12,499
     // enable timer interrupt
     TIMSK1 = (1 << OCIE1A);
+}
+
+void initialise_scroll_timer()
+{
+    TCCR0A = (1 << WGM01);
+    TCCR0B = (1 << CS02) | (1 << CS00);
+    OCR0A = 254;
+    // enable timer interrupt
+    TIMSK0 = (1 << OCIE0A);
 }

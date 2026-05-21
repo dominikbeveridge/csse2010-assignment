@@ -189,6 +189,26 @@ void draw_small_char(char character, uint8_t x_position, uint8_t colour)
     }
 }
 
+void draw_small_char_column(char character, uint8_t x_position, uint8_t col, uint8_t colour)
+{
+    uint8_t column_colour_data[MATRIX_NUM_ROWS];
+
+    uint8_t col_data = get_small_glyph_column(character, col);
+    for (uint8_t i = 0; i < MATRIX_NUM_ROWS; i++)
+    {
+        if (col_data & 1)
+        {
+            column_colour_data[i] = colour;
+        }
+        else
+        {
+            column_colour_data[i] = COLOUR_BLACK;
+        }
+        col_data >>= 1;
+    }
+    ledmatrix_update_column(x_position, column_colour_data);
+}
+
 uint8_t get_small_glyph_column(char c, uint8_t col)
 {
     uint8_t index = char_to_glyph_index(c);

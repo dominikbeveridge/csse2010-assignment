@@ -24,6 +24,7 @@
 #include "timer.h"
 #include "sevensegdisplay.h"
 #include "buzzer.h"
+#include "joystick.h"
 
 /* Internal Function Declarations */
 void initialise_hardware(void);
@@ -40,6 +41,7 @@ uint8_t matrix_animation_frame = 0;
 uint16_t led_io_animation_frame = 0;
 uint64_t led_io_animation = 0;
 
+float DEADZONE = 100;
 uint8_t submit_animation_frames[2] = {4, 7};
 
 // stores character history. History is stored from left to right (left is oldest)
@@ -78,6 +80,13 @@ int consecutive_submits = 0;
 uint32_t b0_hold_time_ms = 0;
 uint32_t b0_release_time_ms = 0;
 
+uint8_t axis = 0;
+volatile uint16_t joystick_x = 512;
+uint16_t joystick_y = 512;
+uint16_t scrollback = 0;
+
+uint16_t joystick_scaler = 0;
+
 int main(void)
 {
     initialise_hardware();
@@ -93,6 +102,7 @@ void initialise_hardware(void)
     init_serial_stdio(19200);
     initialise_piezo();
     play_piezo(200, 100); // silence it
+    initialise_joystick();
     printf("\033[1;39m");
     sei(); // enable global interrupts
     // enable L2 to L7 on A2 to A7
@@ -128,12 +138,17 @@ void start_splash_screen(void)
 void finish_animations()
 {
 
-    if (matrix_animation_frame != 0)
+    if (matrix_animation_frame > 0 && scrollback == 0)
     {
         shift_display_left(matrix_animation_frame);
         matrix_animation_frame = 0;
     }
-
+    else if (scrollback > 0)
+    {
+        draw_character_history(character_history, colour_history, character_index, is_font_large);
+        scrollback = 0;
+        matrix_animation_frame = 0;
+    }
     if (led_io_animation_frame != 0)
     {
         while (led_io_animation_frame > 0)
@@ -153,6 +168,12 @@ void finish_animations()
     buzzer_animation_frame = 0;
 }
 
+void rerender()
+{
+
+    finish_animations();
+    draw_character_history(character_history, colour_history, character_index, is_font_large);
+}
 void handle_serial_input()
 {
     int input = fgetc(stdin);
@@ -285,6 +306,7 @@ void start_morse(void)
     clear_terminal();
     move_terminal_cursor(cursor_x, cursor_y);
     initialise_100ms_timer();
+    initialise_scroll_timer();
 
     while (1)
     {
@@ -464,23 +486,17 @@ void handle_synchronous_inputs()
     prev_b0 = b0_pressed;
 }
 
-void rerender(int font_large)
-{
-    finish_animations();
-    draw_character_history(character_history, colour_history, character_index, font_large);
-}
-
 void handle_inputs(void)
 {
 
     is_font_large = (PIND >> PD5) & 1;
     if (is_font_large && !previous_large)
     {
-        rerender(is_font_large);
+        rerender();
     }
     else if (!is_font_large && previous_large)
     {
-        rerender(is_font_large);
+        rerender();
     }
     previous_large = is_font_large;
 
@@ -550,5 +566,111 @@ ISR(TIMER1_COMPA_vect)
     {
         b0_hold_time_ms = 0;
         b0_release_time_ms = 0;
+    }
+}
+
+ISR(ADC_vect)
+{
+
+    // printf("READING ADC");
+    // if `axis` is 1, we just read the Y-axis, so allocate the ADC result to `y`
+    // otherwise, we just read the X-axis, so allocate the result to `x`
+
+    if (axis)
+    {
+        joystick_y = ADC;
+    }
+    else
+    {
+        joystick_x = ADC;
+    }
+    float distance;
+    if (joystick_x < 512 - DEADZONE)
+    {
+        distance = 511 - DEADZONE - joystick_x;
+    }
+    else
+    {
+        distance = joystick_x - DEADZONE - 512;
+    }
+
+    float strength = distance / (511.0 - DEADZONE);
+    float timer_modifier = 1 - strength;
+
+    OCR0A = 70 + (uint8_t)(timer_modifier * 184.0);
+    // toggle `axis`, so that the next loop will read the other joystick axis
+    axis = axis ? 0 : 1;
+
+    set_joystick_read_axis(axis);
+    ADCSRA |= (1 << ADSC);
+}
+
+ISR(TIMER0_COMPA_vect)
+{
+    joystick_scaler += 1;
+    if (joystick_scaler > 3)
+    {
+        joystick_scaler = 0;
+        if (joystick_x < 511 - DEADZONE && scrollback > 0)
+        {
+            if (!is_font_large)
+            {
+
+                uint8_t stage = scrollback % 4;
+
+                int history_offset = scrollback / 4;
+                if (character_index < history_offset)
+                {
+                    return;
+                }
+                scrollback--;
+                ledmatrix_shift_left();
+                if (stage == 0)
+                {
+                    return;
+                }
+
+                int history_index = character_index - history_offset;
+                char history_letter = character_history[history_index];
+                uint8_t colour = colour_history[history_index];
+
+                if (stage != 0)
+                {
+                    uint8_t col = 3 - stage;
+                    draw_small_char_column(history_letter, MATRIX_NUM_COLUMNS - 1, col, colour);
+                }
+            }
+        }
+        else if (joystick_x >= 512 + DEADZONE)
+        {
+            if (!is_font_large)
+            {
+
+                scrollback++;
+                uint8_t stage = scrollback % 4;
+
+                int history_offset = 4 + scrollback / 4;
+                if (character_index < history_offset)
+                {
+                    scrollback--;
+                    return;
+                }
+                ledmatrix_shift_right();
+                if (stage == 0)
+                {
+                    return;
+                }
+
+                int history_index = character_index - history_offset;
+                char history_letter = character_history[history_index];
+                uint8_t colour = colour_history[history_index];
+
+                if (stage != 0)
+                {
+                    uint8_t col = 3 - stage;
+                    draw_small_char_column(history_letter, 0, col, colour);
+                }
+            }
+        }
     }
 }
